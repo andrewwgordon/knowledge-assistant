@@ -15,10 +15,12 @@ def process_pdf(pdf_path):
     for page in pdf.pages:
         tables = page.extract_tables()
         for table in tables:
-            df = pd.DataFrame(table)
-            df.columns = df.iloc[0]
-            markdown = df.drop(0).to_markdown(index=False)
-            print(markdown)
+            if table[0][0] is not None:
+                if (table[0][0][4:] != 'Page') or (table[0][0][4:] != 'Doc.'):
+                    df = pd.DataFrame(table)
+                    df.columns = df.iloc[0]
+                    markdown = df.drop(0).to_markdown(index=False)
+                    print(markdown)
 
 # Path to your PDF file
 pdf_path = r"./docs/70115e-r9-complete.pdf"
