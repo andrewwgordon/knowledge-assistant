@@ -1,5 +1,7 @@
 # Documents to load
 docs/
+# Vector store
+db/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
