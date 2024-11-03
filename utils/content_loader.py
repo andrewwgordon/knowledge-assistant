@@ -1,13 +1,22 @@
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 from os import environ
 from dotenv import load_dotenv
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from openai import OpenAI
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_openai import OpenAI
 import pdfplumber
 from langchain_community.document_loaders import PDFPlumberLoader
+from langchain_core.documents import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
+import itertools, sys
 
 load_dotenv()
 
-llm_client = OpenAI(api_key=environ['OPENAI_API_KEY'])
+llm_client = OpenAI(
+    api_key=environ['OPENAI_API_KEY']
+)
 
 def get_hypothetical_questions(table):
     prompt = f"""
@@ -18,7 +27,7 @@ def get_hypothetical_questions(table):
     Provide a list of exactly three questions that the above table description and content could be used to answer
     """
     response = llm_client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant that provides hypothetical questions from a given table."},
             {"role": "user", "content": prompt}
@@ -43,7 +52,7 @@ def get_table_description(table_content, document_context):
     """
 
     response = llm_client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant that describes tables and formats them in markdown."},
             {"role": "user", "content": prompt}
@@ -63,10 +72,22 @@ def set_metadata(page):
 
 def process_pdf(pdf_path):
     pdf = pdfplumber.open(pdf_path)
-    all_text = []
+    print(f'Processing {len(pdf.pages)} pages:')
+    transformed_document = []
     for page in pdf.pages:
+        sys.stdout.write('.')
+        sys.stdout.flush()            
         if page.page_number > 20:
             text = page.extract_text()
+            transformed_document.append(
+                Document(
+                    page_content=text,
+                    metadata={
+                        'source': 'Diamond Aircraft Airplane Flight Manual DA 42 NG',
+                        'page': page.page_number
+                    }
+                )
+            )
             tables = page.extract_tables()
             for table in tables:
                 first_cell = table[0][0]
@@ -78,9 +99,44 @@ def process_pdf(pdf_path):
                         table_description = get_table_description(
                             table_formated,text
                         )
-                        hypothetical_questions = get_hypothetical_questions(table_description)
-                        print(hypothetical_questions)
-       
-# Path to your PDF file
-pdf_path = r"./docs/70115e-r9-complete.pdf"
-process_pdf(pdf_path)
+                        transformed_document.append(
+                            Document(
+                                page_content=table_description,
+                                metadata={
+                                    'source': 'Diamond Aircraft Airplane Flight Manual DA 42 NG',
+                                    'page': page.page_number
+                                }
+                            )
+                        )
+    return transformed_document
+
+def split_document(document):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=300,
+        chunk_overlap=100,
+        length_function=len,
+        add_start_index=True
+    )
+    return text_splitter.split_documents(document)
+
+def create_vectorstore(split_document):
+    vectorstore = Chroma.from_documents(
+        persist_directory='./db',
+        documents=split_document, 
+        embedding=HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
+    )
+    vectorstore.persist()
+
+def pdf_to_vector():
+    print('Starting..')
+    pdf_path = r"./docs/70115e-r9-complete.pdf"
+    print('Processing document...')
+    document = process_pdf(pdf_path)
+    print('Spliting processed document...')
+    document_split = split_document(document)
+    print('Creating vector store...')
+    create_vectorstore(document_split)
+
+pdf_to_vector()
