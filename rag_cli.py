@@ -43,7 +43,7 @@ def format_docs(docs):
 
 # Chain
 rag_chain = (
-    {"context": retriever, "question": RunnablePassthrough()}
+    {"context": retriever | format_docs, "question": RunnablePassthrough()}
     | prompt
     | llm
     | StrOutputParser()
